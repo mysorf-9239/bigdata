@@ -13,16 +13,14 @@ Author: Mysorf
 
 import os
 import time
-import json
 import requests
 import pandas as pd
-from datetime import datetime
 from dotenv import load_dotenv
 
 # Load environment
 load_dotenv()
 
-DATA_DIR = os.getenv("DATA_DIR", "data/historical")
+DATA_DIR = os.getenv("DATA_DIR", "../data/historical")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 SYMBOLS = [s.strip().upper() for s in os.getenv("CRYPTO_SYMBOLS", "BTC/USDT,ETH/USDT").split(",")]
