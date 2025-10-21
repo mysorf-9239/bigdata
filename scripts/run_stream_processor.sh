@@ -12,6 +12,8 @@ export WRITE_TO_CONSOLE=false
 export ELASTICSEARCH_HOST=localhost
 export ELASTICSEARCH_PORT=9200
 export ELASTICSEARCH_INDEX=crypto_ohlcv_1m
+export MODEL_PATH=../models/xgb_model.json
+export SCALER_PATH=../models/scaler.pkl
 
 spark-submit \
   --master local[2] \

@@ -1,34 +1,46 @@
 """
 Service: stream_processor.py
 --------------------------
-Spark Structured Streaming: Kafka -> (Console | Elasticsearch)
+Kafka → Spark Structured Streaming → Model Predict → Elasticsearch
+
+Reads JSON OHLCV messages from Kafka, applies trained XGBoost model
+to predict price direction ("UP"/"DOWN"), then writes to Elasticsearch.
 
 Author: Mysorf
 """
 
 import os
+import joblib
+import pandas as pd
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json
+from pyspark.sql.functions import col, from_json, udf
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, LongType
+from xgboost import XGBClassifier
 
 # Kafka
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
 KAFKA_TOPIC = os.getenv("KAFKA_OHLCV_1M_TOPIC", "crypto_ohlcv_1m")
 
-# Elacticsearch
+# Elasticsearch
 ES_HOST = os.getenv("ELASTICSEARCH_HOST", "localhost")
 ES_PORT = os.getenv("ELASTICSEARCH_PORT", "9200")
-ES_INDEX = os.getenv("ELASTICSEARCH_INDEX", "crypto_ohlcv_1m")
+# Nên tách index dự đoán khỏi index dữ liệu gốc
+ES_INDEX = os.getenv("ELASTICSEARCH_INDEX", "crypto_ohlcv_1m_pred")
 
 # Streaming
-CHECKPOINT_DIR = os.getenv("CHECKPOINT_DIR", "/tmp/stream-checkpoint")
+CHECKPOINT_DIR = os.getenv("CHECKPOINT_DIR", "/tmp/stream-checkpoint-es")
 
-# Nếu ES_HOST, ES_PORT rỗng hoặc WRITE_TO_CONSOLE=true -> ghi ra console
+# Nếu ES_HOST/PORT trống hoặc WRITE_TO_CONSOLE=true → ghi ra console
 WRITE_TO_CONSOLE = (
-    os.getenv("WRITE_TO_CONSOLE", "true").lower() == "true"
+    os.getenv("WRITE_TO_CONSOLE", "false").lower() == "true"
     or not (ES_HOST and ES_PORT)
 )
 
+# Path
+MODEL_PATH = os.getenv("MODEL_PATH", "../models/xgb_model.json")
+SCALER_PATH = os.getenv("SCALER_PATH", "../models/scaler.pkl")
+
+# Schema
 schema = StructType([
   StructField("symbol", StringType()),
   StructField("exchange", StringType()),
@@ -42,18 +54,46 @@ schema = StructType([
 ])
 
 
+# Load model
+def load_model():
+  print(f"[INFO] Loading model: {MODEL_PATH} and scaler: {SCALER_PATH} ...")
+  model = XGBClassifier()
+  model.load_model(MODEL_PATH)
+  scaler = joblib.load(SCALER_PATH)
+  return model, scaler
+
+
+MODEL, SCALER = load_model()
+
+
+# Predict udf
+def predict_direction(open_, high_, low_, close_, volume_):
+  if None in (open_, high_, low_, close_, volume_):
+    return "UNKNOWN"
+  try:
+    features = pd.DataFrame(
+      [[open_, high_, low_, close_, volume_]],
+      columns=["open", "high", "low", "close", "volume"]
+    )
+    scaled = SCALER.transform(features)
+    pred = MODEL.predict(scaled)
+    return "UP" if int(pred[0]) == 1 else "DOWN"
+  except Exception as e:
+    print("[WARN] Prediction error:", e)
+    return "ERROR"
+
+
+predict_udf = udf(predict_direction, StringType())
+
+
 def main():
   spark = (
     SparkSession.builder
-    .appName("stream-ohlcv-1m")
-    # Fix Hadoop UGI getSubject bug on macOS + Java >=17
+    .appName("stream-ohlcv-predict")
+    # Fix Hadoop UGI getSubject bug on macOS + Java >= 17
     .config("spark.hadoop.fs.file.impl.disable.cache", "true")
     .config("spark.hadoop.fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.LocalFs")
     .config("spark.sql.streaming.checkpointLocation", CHECKPOINT_DIR)
-    .config("es.nodes", ES_HOST)
-    .config("es.port", ES_PORT)
-    .config("es.nodes.wan.only", "true")
-    .config("es.index.auto.create", "true")
     .getOrCreate()
   )
   spark.sparkContext.setLogLevel("WARN")
@@ -76,34 +116,40 @@ def main():
     .withColumnRenamed("@timestamp", "ts_iso")
   )
 
-  # Disable checkpoint on macOS (fix getSubject issue)
-  checkpoint_arg = {}
-  if os.uname().sysname != "Darwin":  # Darwin = macOS
-    checkpoint_arg["checkpointLocation"] = CHECKPOINT_DIR
+  # Apply Prediction
+  predicted = parsed.withColumn(
+    "prediction",
+    predict_udf(col("open"), col("high"), col("low"), col("close"), col("volume"))
+  )
+
+  # Checkpoint args
+  checkpoint_args = {"checkpointLocation": CHECKPOINT_DIR}
 
   if WRITE_TO_CONSOLE:
     query = (
-      parsed.writeStream
+      predicted.writeStream
       .outputMode("append")
       .format("console")
       .option("truncate", "false")
       .option("numRows", 20)
-      .options(**checkpoint_arg)
+      .options(**checkpoint_args)
       .start()
     )
-    print("[INFO] Writing to CONSOLE sink…")
+    print("[INFO] Writing PREDICTIONS to CONSOLE sink…")
   else:
     query = (
-      parsed.writeStream
+      predicted.writeStream
       .outputMode("append")
       .format("org.elasticsearch.spark.sql")
+      .option("es.nodes", ES_HOST)
+      .option("es.port", ES_PORT)
       .option("es.nodes.wan.only", "true")
-      .option("checkpointLocation", CHECKPOINT_DIR)
+      .option("es.index.auto.create", "true")
       .option("es.resource", ES_INDEX)
-      .options(**checkpoint_arg)
+      .options(**checkpoint_args)
       .start()
     )
-    print(f"[INFO] Writing to Elasticsearch http://{ES_HOST}:{ES_PORT}/{ES_INDEX}")
+    print(f"[INFO] Writing PREDICTIONS to Elasticsearch http://{ES_HOST}:{ES_PORT} index={ES_INDEX}")
 
   query.awaitTermination()
 
