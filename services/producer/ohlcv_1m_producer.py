@@ -2,7 +2,7 @@
 Service: ohlcv_1m_producer
 --------------------------
 Target: Collect OHLCV data every minute from Binance (or other exchange)
-and send to Kafka topic crypto_ohlcv_1m.
+and send to Kafka topic 'crypto_ohlcv_1m'.
 
 Author: Mysorf
 """
@@ -11,10 +11,10 @@ import os
 import time
 import json
 import logging
-from datetime import datetime
-from kafka import KafkaProducer
 import requests
+from datetime import datetime
 from dotenv import load_dotenv
+from kafka import KafkaProducer
 
 # === Load env ===
 load_dotenv()
@@ -36,7 +36,10 @@ logger = logging.getLogger("producer")
 # === Kafka ===
 producer = KafkaProducer(
   bootstrap_servers=KAFKA_BROKER,
-  value_serializer=lambda v: json.dumps(v).encode("utf-8")
+  value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+  retries=5,
+  linger_ms=500,
+  max_in_flight_requests_per_connection=1,
 )
 
 
