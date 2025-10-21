@@ -10,7 +10,7 @@ if curl -s http://localhost:9200 >/dev/null 2>&1; then
   echo "[INFO] Elasticsearch is already running."
 else
   echo "[INFO] Starting new Elasticsearch instance..."
-  elasticsearch -E xpack.ml.enabled=false > logs/elasticsearch.log 2>&1 &
+  elasticsearch -E xpack.ml.enabled=false > ../logs/elasticsearch.log 2>&1 &
   echo "[INFO] Waiting for Elasticsearch to start..."
   # Wait max 60 seconds for ES up
   for i in {1..60}; do
@@ -31,6 +31,6 @@ echo "[INFO] Starting Kibana..."
 if pgrep -x "kibana" >/dev/null; then
   echo "[INFO] Kibana is already running."
 else
-  kibana > logs/kibana.log 2>&1 &
+  kibana > ../logs/kibana.log 2>&1 &
   echo "[INFO] Kibana started successfully! (Check logs/kibana.log)"
 fi

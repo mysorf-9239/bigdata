@@ -8,7 +8,7 @@ java -version
 export KAFKA_BROKER=localhost:9092
 export KAFKA_OHLCV_1M_TOPIC=crypto_ohlcv_1m
 export CHECKPOINT_DIR=/tmp/stream-checkpoint-es
-export WRITE_TO_CONSOLE=true
+export WRITE_TO_CONSOLE=false
 export ELASTICSEARCH_HOST=localhost
 export ELASTICSEARCH_PORT=9200
 export ELASTICSEARCH_INDEX=crypto_ohlcv_1m
