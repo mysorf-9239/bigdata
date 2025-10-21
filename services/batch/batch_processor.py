@@ -16,6 +16,7 @@ Author: Mysorf
 import os
 import glob
 import pickle
+import numpy as np
 import pandas as pd
 from xgboost import XGBClassifier
 from sklearn.preprocessing import StandardScaler
@@ -111,7 +112,7 @@ def main():
   acc = model.score(X_test, y_test)
   print(f"Model trained successfully. Test accuracy = {acc:.4f}")
 
-  with open(os.path.join(MODEL_DIR, "model_xgb.pkl"), "wb") as f:
+  with open(os.path.join(MODEL_DIR, "xgb_model.pkl"), "wb") as f:
     pickle.dump(model, f)
   with open(os.path.join(MODEL_DIR, "scaler.pkl"), "wb") as f:
     pickle.dump(scaler, f)
